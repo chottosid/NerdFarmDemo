@@ -148,6 +148,25 @@ async def generate_draft(request: GenerateDraftRequest) -> GenerateDraftResponse
     )
 
 
+@router.get("/types/available")
+async def get_draft_types() -> dict:
+    """Get available draft types.
+
+    Returns:
+        List of available draft types with descriptions
+    """
+    return {
+        "draft_types": [
+            {
+                "value": dt.value,
+                "name": dt.name,
+                "description": _get_draft_type_description(dt),
+            }
+            for dt in DraftType
+        ]
+    }
+
+
 @router.get("/{draft_id}")
 async def get_draft(draft_id: str) -> dict:
     """Get a generated draft by ID.
@@ -205,25 +224,6 @@ async def get_formatted_draft(draft_id: str) -> dict:
     return {
         "draft_id": draft_id,
         "formatted_content": formatted,
-    }
-
-
-@router.get("/types/available")
-async def get_draft_types() -> dict:
-    """Get available draft types.
-
-    Returns:
-        List of available draft types with descriptions
-    """
-    return {
-        "draft_types": [
-            {
-                "value": dt.value,
-                "name": dt.name,
-                "description": _get_draft_type_description(dt),
-            }
-            for dt in DraftType
-        ]
     }
 
 

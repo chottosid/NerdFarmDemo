@@ -240,14 +240,19 @@ def show_generate_page():
                         st.session_state.current_draft = result
                         st.session_state.edit_content = ""
 
+                        # Show grounding warning if not grounded
+                        if not result.get("is_grounded", True):
+                            st.warning(f"⚠️ {result.get('grounding_warning', 'Insufficient evidence')}")
+
                         st.success("✅ Draft generated")
-                        col1, col2 = st.columns(2)
+                        col1, col2, col3 = st.columns(3)
                         col1.metric("Type", result.get("draft_type", "N/A"))
-                        col2.metric("Confidence", f"{result['confidence']:.0%}")
+                        col2.metric("Confidence", f"{result.get('confidence', 0):.0%}")
+                        col3.metric("Edit Examples Used", result.get("edit_examples_used", 0))
 
                         st.text_area(
                             "Draft Content",
-                            value=result["content"],
+                            value=result.get("content", ""),
                             height=300,
                             key="draft_output",
                         )
@@ -255,13 +260,13 @@ def show_generate_page():
                         if result.get("citations"):
                             with st.expander(f"📚 Citations ({len(result['citations'])})"):
                                 for i, c in enumerate(result["citations"], 1):
-                                    st.markdown(f"**[{i}]** {c['source_doc']}, Page {c['page']}")
+                                    st.markdown(f"**[{i}]** {c.get('source_doc', 'Unknown')}, Page {c.get('page', 'N/A')}")
 
-                        if result.get("applied_rules"):
-                            with st.expander(f"🧠 Applied Rules ({len(result['applied_rules'])})"):
-                                for r in result["applied_rules"]:
-                                    st.markdown(f"- **WHEN:** {r['when']}")
-                                    st.markdown(f"  **THEN:** {r['then']}")
+                        if result.get("retrieved_chunks"):
+                            with st.expander(f"🔍 Retrieved Chunks ({len(result['retrieved_chunks'])})"):
+                                for i, chunk in enumerate(result["retrieved_chunks"], 1):
+                                    st.caption(f"**[{i}]** Score: {chunk.get('score', 0):.2f} | {chunk.get('source_doc', 'Unknown')}, Page {chunk.get('page', 'N/A')}")
+                                    st.text(chunk.get("text", "")[:200] + "..." if len(chunk.get("text", "")) > 200 else chunk.get("text", ""))
                     else:
                         st.error(f"Error: {response.text}")
                 except Exception as e:
@@ -313,18 +318,23 @@ def show_edit_page():
                         "original_text": original,
                         "edited_text": edited,
                         "edit_reason": edit_reason or None,
-                        "document_context": draft.get("draft_type", ""),
+                        "draft_type": draft.get("draft_type", "global"),
                     }
                     response = asyncio.run(api_request("POST", "/api/edits/submit", json=payload))
 
                     if response.status_code == 200:
                         result = response.json()
-                        st.success(f"✅ Submitted — Pattern: {result.get('pattern_detected', 'N/A')}")
-                        st.session_state.edit_history.append({
-                            "edit_id": result["edit_id"],
-                            "pattern": result.get("pattern_detected"),
-                            "timestamp": datetime.now().isoformat(),
-                        })
+                        if result.get("quality_rejected"):
+                            st.warning(f"⚠️ Edit rejected: {result.get('message', 'Too trivial')}")
+                        elif result.get("duplicate_of"):
+                            st.info(f"ℹ️ Duplicate of existing edit: {result['duplicate_of'][:8]}...")
+                        else:
+                            st.success(f"✅ Edit stored — Quality Score: {result.get('message', 'N/A')}")
+                            st.session_state.edit_history.append({
+                                "edit_id": result.get("edit_id", "unknown"),
+                                "draft_type": draft.get("draft_type", "global"),
+                                "timestamp": datetime.now().isoformat(),
+                            })
                     else:
                         st.error(f"Error: {response.text}")
                 except Exception as e:
@@ -335,38 +345,61 @@ def show_learning_page():
     st.title("📊 Learning Stats")
 
     try:
+        # Get edit history
         response = asyncio.run(api_request("GET", "/api/edits/history?limit=50"))
 
         if response.status_code == 200:
             history = response.json()
             edits = history.get("edits", [])
 
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric("Total Edits", history.get("total", 0))
-            patterns = [e.get("pattern_type") for e in edits if e.get("pattern_type")]
-            col2.metric("Pattern Types", len(set(patterns)) if patterns else 0)
 
-            if patterns:
+            # Count draft types
+            draft_types = [e.get("draft_type", "unknown") for e in edits]
+            col2.metric("Draft Types", len(set(draft_types)) if draft_types else 0)
+
+            # Average quality score
+            quality_scores = [e.get("quality_score", 0) for e in edits if e.get("quality_score")]
+            avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+            col3.metric("Avg Quality", f"{avg_quality:.2f}")
+
+            if draft_types:
                 st.divider()
-                st.markdown("#### Pattern Distribution")
-                pattern_counts = {}
-                for p in patterns:
-                    pattern_counts[p] = pattern_counts.get(p, 0) + 1
-                st.bar_chart(pattern_counts)
+                st.markdown("#### Draft Type Distribution")
+                type_counts = {}
+                for t in draft_types:
+                    type_counts[t] = type_counts.get(t, 0) + 1
+                st.bar_chart(type_counts)
+
+            # Get effectiveness report
+            try:
+                eff_response = asyncio.run(api_request("GET", "/api/edits/effectiveness"))
+                if eff_response.status_code == 200:
+                    eff = eff_response.json()
+                    st.divider()
+                    st.markdown("#### Learning Effectiveness")
+                    col1, col2 = st.columns(2)
+                    col1.metric("Total Edits Stored", eff.get("total_edits", 0))
+                    col2.metric("Avg Quality Score", f"{eff.get('avg_quality_score', 0):.2f}")
+            except Exception:
+                pass
 
             if edits:
                 st.divider()
                 st.markdown("#### Recent Edits")
                 for edit in edits[:5]:
-                    with st.expander(f"{edit['edit_id'][:8]}... — {edit.get('pattern_type', 'unknown')}"):
-                        st.caption(f"**Original:** {edit['original_text'][:150]}...")
-                        st.caption(f"**Edited:** {edit['edited_text'][:150]}...")
+                    with st.expander(f"{edit['edit_id'][:8]}... — {edit.get('draft_type', 'unknown')} (Q: {edit.get('quality_score', 0):.2f})"):
+                        st.caption(f"**Before:** {edit.get('before', '')[:150]}...")
+                        st.caption(f"**After:** {edit.get('after', '')[:150]}...")
+                        if edit.get("reason"):
+                            st.caption(f"**Reason:** {edit['reason']}")
 
             if st.session_state.edit_history:
                 st.divider()
                 st.markdown("#### Your Edits This Session")
                 for e in st.session_state.edit_history:
-                    st.markdown(f"- `{e['edit_id'][:8]}...` — {e['pattern']}")
+                    st.markdown(f"- `{e['edit_id'][:8]}...` — {e.get('draft_type', 'unknown')}")
         else:
             st.warning("Could not fetch history. Backend running?")
     except Exception as e:
