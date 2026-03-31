@@ -6,132 +6,119 @@ import os
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime
 
-from app.learning.edit_store import OperatorEdit, EditPattern, EditStore
+from app.learning.simple_edit_store import SimpleEditStore, EditExample, QualityGate
 
 
-class TestOperatorEdit:
-    """Tests for OperatorEdit dataclass."""
+class TestQualityGate:
+    """Tests for QualityGate class."""
+
+    def test_meaningful_edit_passes(self):
+        """Test that substantial edits pass quality gate."""
+        gate = QualityGate()
+        is_valid, score = gate.is_meaningful(
+            "The plaintiff filed a case.",
+            "The plaintiff, Martha Smith, filed a case against Johnson Properties LLC.",
+        )
+        assert is_valid is True
+        assert score > 0.5
+
+    def test_trivial_edit_rejected(self):
+        """Test that trivial edits are rejected."""
+        gate = QualityGate()
+        is_valid, score = gate.is_meaningful(
+            "The plaintiff filed.",
+            "The plaintiff filed.",  # Same text
+        )
+        assert is_valid is False
+        assert score == 0.0
+
+    def test_whitespace_only_rejected(self):
+        """Test that whitespace-only changes are rejected."""
+        gate = QualityGate()
+        is_valid, score = gate.is_meaningful(
+            "Hello world",
+            "Hello  world",  # Just extra space
+        )
+        assert is_valid is False
+
+    def test_short_text_rejected(self):
+        """Test that very short texts are rejected."""
+        gate = QualityGate()
+        is_valid, score = gate.is_meaningful(
+            "Hi",
+            "Hello",
+        )
+        assert is_valid is False
+
+
+class TestEditExample:
+    """Tests for EditExample dataclass."""
 
     def test_edit_creation(self):
-        """Test creating an OperatorEdit."""
-        edit = OperatorEdit(
+        """Test creating an EditExample."""
+        edit = EditExample(
             edit_id="edit_123",
-            draft_id="draft_456",
-            original_text="Original text",
-            edited_text="Edited text",
-            edit_reason="Fixed typo",
+            before="Original text",
+            after="Edited text",
+            reason="Fixed typo",
         )
 
         assert edit.edit_id == "edit_123"
-        assert edit.draft_id == "draft_456"
-        assert edit.original_text == "Original text"
-        assert edit.edited_text == "Edited text"
-        assert edit.edit_reason == "Fixed typo"
+        assert edit.before == "Original text"
+        assert edit.after == "Edited text"
+        assert edit.reason == "Fixed typo"
 
 
-class TestEditPattern:
-    """Tests for EditPattern dataclass."""
+class TestSimpleEditStore:
+    """Tests for SimpleEditStore class."""
 
-    def test_pattern_creation(self):
-        """Test creating an EditPattern."""
-        pattern = EditPattern(
-            change_type="addition",
-            before_snippet="Before",
-            after_snippet="After with more content",
-            description="Content was expanded",
-        )
-
-        assert pattern.change_type == "addition"
-        assert "expanded" in pattern.description
-
-
-class TestEditStore:
-    """Tests for EditStore class."""
-
-    @patch("app.learning.edit_store.get_settings")
-    def test_init_db(self, mock_settings):
-        """Test database initialization."""
+    @patch("app.learning.simple_edit_store.EmbeddingClient")
+    def test_store_initialization(self, mock_embedding_client):
+        """Test store initializes correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, "test_edits.db")
-            mock_settings.return_value = Mock(
-                sqlite_db_path=db_path,
-            )
+            with patch.dict(
+                os.environ,
+                {"CHROMA_PERSIST_DIR": tmpdir, "OPENROUTER_API_KEY": "test-key"},
+            ):
+                store = SimpleEditStore()
+                assert store.collection is not None
 
-            store = EditStore()
-
-            # Database file should exist
-            assert os.path.exists(db_path)
-
-    @patch("app.learning.edit_store.get_settings")
-    def test_analyze_pattern_addition(self, mock_settings):
-        """Test pattern detection for additions."""
+    @pytest.mark.asyncio
+    @patch("app.learning.simple_edit_store.EmbeddingClient")
+    async def test_save_edit_quality_rejected(self, mock_embedding_client):
+        """Test that low-quality edits are rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            mock_settings.return_value = Mock(
-                sqlite_db_path=os.path.join(tmpdir, "test.db"),
-            )
+            with patch.dict(
+                os.environ,
+                {"CHROMA_PERSIST_DIR": tmpdir, "OPENROUTER_API_KEY": "test-key"},
+            ):
+                store = SimpleEditStore()
 
-            store = EditStore()
-            pattern = store._analyze_pattern(
-                "Short text",
-                "Short text with lots of additional content and details",
-            )
+                # Try to save a trivial edit
+                result = await store.save_edit(
+                    before="Hello",
+                    after="Hello",  # Same text
+                    reason="No change",
+                    draft_type="test",
+                )
 
-            assert pattern is not None
-            assert pattern.change_type == "addition"
-
-    @patch("app.learning.edit_store.get_settings")
-    def test_analyze_pattern_reduction(self, mock_settings):
-        """Test pattern detection for reductions."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mock_settings.return_value = Mock(
-                sqlite_db_path=os.path.join(tmpdir, "test.db"),
-            )
-
-            store = EditStore()
-            pattern = store._analyze_pattern(
-                "This is a very long piece of text that will be significantly reduced",
-                "Short",
-            )
-
-            assert pattern is not None
-            assert pattern.change_type == "reduction"
-
-    def test_cosine_similarity(self):
-        """Test cosine similarity calculation."""
-        store = EditStore.__new__(EditStore)
-
-        vec1 = [1.0, 0.0, 0.0]
-        vec2 = [1.0, 0.0, 0.0]
-        similarity = store._cosine_similarity(vec1, vec2)
-        assert similarity == pytest.approx(1.0, rel=0.01)
-
-        vec1 = [1.0, 0.0, 0.0]
-        vec2 = [0.0, 1.0, 0.0]
-        similarity = store._cosine_similarity(vec1, vec2)
-        assert similarity == pytest.approx(0.0, rel=0.01)
-
-        vec1 = [1.0, 1.0, 0.0]
-        vec2 = [1.0, 0.0, 0.0]
-        similarity = store._cosine_similarity(vec1, vec2)
-        assert 0.5 < similarity < 1.0
+                assert result is None  # Should be rejected
 
 
 class TestFewShotRetriever:
-    """Tests for FewShotRetriever class."""
+    """Tests for FewShotRetriever functionality."""
 
     def test_format_examples_for_prompt_empty(self):
         """Test formatting empty examples."""
-        from app.learning.few_shot import FewShotRetriever
+        from app.learning import format_examples_for_prompt
 
-        retriever = FewShotRetriever()
-        result = retriever.format_examples_for_prompt([])
+        result = format_examples_for_prompt([])
         assert result == ""
 
-    def test_format_examples_for_prompt(self):
+    def test_format_examples_with_content(self):
         """Test formatting examples for prompt."""
-        from app.learning.few_shot import FewShotRetriever
+        from app.learning import format_examples_for_prompt
 
-        retriever = FewShotRetriever()
         examples = [
             {
                 "before": "Before text",
@@ -140,10 +127,10 @@ class TestFewShotRetriever:
             }
         ]
 
-        result = retriever.format_examples_for_prompt(examples)
+        result = format_examples_for_prompt(examples)
 
         assert "Example 1:" in result
         assert "Before text" in result
         assert "After text" in result
         assert "Test reason" in result
-        assert "learned improvements" in result.lower()
+        assert "learn from these past improvements" in result.lower()

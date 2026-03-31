@@ -2,16 +2,56 @@
 
 An AI-powered internal tooling system for **Pearson Specter Litt** that processes messy legal-style documents, extracts structured information, and produces grounded draft outputs that improve from operator feedback.
 
-## Overview
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- Poppler (for PDF processing):
+  - Linux: `sudo apt install poppler-utils`
+  - macOS: `brew install poppler`
+- OpenRouter API key ([get one here](https://openrouter.ai/))
+
+### Setup
+
+```bash
+# Clone and enter the project
+cd nerdfarm
+
+# Copy environment file and add your API key
+cp .env.example .env
+# Edit .env and set: OPENROUTER_API_KEY=sk-or-...
+
+# Install dependencies
+uv sync
+
+# Start the backend server
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Running the Frontend
+
+In a separate terminal:
+
+```bash
+# Start the Streamlit frontend
+uv run streamlit run frontend.py
+```
+
+**Access:**
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Frontend UI: http://localhost:8501
+
+## System Overview
 
 NerdFarm handles the full document understanding pipeline:
 
-1. **Document Processing** — Vision-based extraction from PDFs, images, and text files using GPT-4o Vision for accurate text, table, signature, and stamp extraction
-2. **Grounded Retrieval** — Vector-based semantic search over extracted content with source citations and evidence tracking
-3. **Draft Generation** — LLM-powered legal draft creation (memos, case summaries, title reviews, etc.) grounded in retrieved evidence
-4. **Improvement from Edits** — Captures operator edits and uses few-shot learning to improve future generations
-
-## Architecture
+1. **Document Processing** — Vision-based extraction from PDFs, images, and text files using GPT-4o Vision
+2. **Grounded Retrieval** — Hybrid vector + keyword search with cross-encoder reranking
+3. **Draft Generation** — LLM-powered legal draft creation grounded in retrieved evidence
+4. **Improvement from Edits** — Captures operator edits and uses few-shot learning
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -26,34 +66,39 @@ NerdFarm handles the full document understanding pipeline:
                                                   └────────────────┘
 ```
 
-**Tech Stack:** FastAPI · ChromaDB · OpenAI GPT-4o (via OpenRouter) · Pillow
+## Frontend Guide
 
-## Quick Start
+The Streamlit frontend provides 5 pages:
 
-### Prerequisites
+### 🏠 Home
+System overview and workflow description.
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Poppler (for PDF to image conversion): `sudo apt install poppler-utils` (Linux) / `brew install poppler` (macOS)
+### 📤 Upload
+- Drag-and-drop file upload
+- Supports: PDF, PNG, JPG, JPEG, TIFF, BMP, TXT
+- Shows processing progress and results
+- Displays: pages, chunks, extraction confidence
 
-### Setup
+### 📝 Generate
+- Select documents to query against
+- Choose draft type (case summary, title review, memo, etc.)
+- Enter query in natural language
+- View generated draft with:
+  - Confidence score
+  - Citations (expandable)
+  - Retrieved chunks (expandable)
+  - Grounding warnings (if insufficient evidence)
 
-```bash
-# Clone and enter the project
-cd nerdfarm
+### ✏️ Edit
+- Side-by-side original vs edited view
+- Submit corrections for learning
+- Optional edit reason
 
-# Copy environment file and add your API key
-cp .env.example .env
-# Edit .env and set OPENROUTER_API_KEY=sk-or-...
-
-# Install dependencies
-uv sync
-
-# Run the server
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+### 📊 Learning
+- View edit statistics
+- Draft type distribution chart
+- Recent edits with quality scores
+- Effectiveness metrics
 
 ## API Endpoints
 
@@ -61,8 +106,9 @@ The API will be available at `http://localhost:8000`. Interactive docs at `http:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/documents/upload` | Upload and process a document |
-| `GET` | `/api/documents/{id}` | Get processed document details |
-| `GET` | `/api/documents/{id}/chunks` | Get document chunks from vector store |
+| `GET` | `/api/documents` | List all documents |
+| `GET` | `/api/documents/{id}` | Get document details |
+| `GET` | `/api/documents/{id}/chunks` | Get document chunks |
 | `DELETE` | `/api/documents/{id}` | Delete a document |
 
 ### Drafts
@@ -79,63 +125,75 @@ The API will be available at `http://localhost:8000`. Interactive docs at `http:
 | `POST` | `/api/edits/submit` | Submit an operator edit |
 | `GET` | `/api/edits/history` | View edit history |
 | `GET` | `/api/edits/{id}` | Get specific edit |
-| `GET` | `/api/edits/draft/{draft_id}` | Get edits for a draft |
-| `GET` | `/api/edits/similar/{query}` | Find similar past edits |
+| `GET` | `/api/edits/effectiveness` | Get learning metrics |
 
-## Sample Usage
+## Sample Usage (CLI)
 
-### 1. Upload a sample document
-
+### Upload a document
 ```bash
 curl -X POST http://localhost:8000/api/documents/upload \
   -F "file=@sample_docs/case_facts_001.txt"
 ```
 
-Response:
-```json
-{
-  "document_id": "abc-123-...",
-  "filename": "case_facts_001.txt",
-  "total_pages": 1,
-  "avg_confidence": 100.0,
-  "chunks_created": 5,
-  "has_unclear_sections": false
-}
-```
-
-### 2. Generate a draft
-
+### Generate a draft
 ```bash
 curl -X POST http://localhost:8000/api/drafts/generate \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "Summarize the key facts of the Smith v. Johnson Properties case",
+    "query": "Summarize the Smith v. Johnson case",
     "draft_type": "case_fact_summary"
   }'
 ```
 
-### 3. Submit an operator edit
-
+### Submit an edit
 ```bash
 curl -X POST http://localhost:8000/api/edits/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "draft_id": "<draft_id_from_step_2>",
+    "draft_id": "<draft_id>",
     "original_text": "The plaintiff purchased the property.",
-    "edited_text": "The plaintiff, Martha Smith (age 68), purchased the residential property at 456 Oak Avenue, Chicago, IL in August 2020.",
-    "edit_reason": "Added specific details about the plaintiff and property"
+    "edited_text": "The plaintiff, Martha Smith, purchased the property at 456 Oak Avenue in August 2020.",
+    "edit_reason": "Added specific details"
   }'
 ```
 
-Future drafts will automatically learn from this edit to include more specific details.
+## Project Structure
 
-## Sample Documents
-
-Three sample legal documents are included in `sample_docs/`:
-
-- `title_review_001.txt` — Title review report for a property at 123 Main Street
-- `case_facts_001.txt` — Case fact summary for Smith v. Johnson Properties LLC
-- `notice_001.txt` — Notice of Trustee's Sale for a foreclosure proceeding
+```
+nerdfarm/
+├── app/
+│   ├── main.py                  # FastAPI application
+│   ├── config.py                # Settings and configuration
+│   ├── api/
+│   │   ├── documents.py         # Document endpoints
+│   │   ├── drafts.py            # Draft generation endpoints
+│   │   └── edits.py             # Edit/learning endpoints
+│   ├── document_processor/
+│   │   ├── extractor.py         # Document extraction logic
+│   │   ├── vision_processor.py  # GPT-4o Vision processing
+│   │   └── schemas.py           # Data structures
+│   ├── retrieval/
+│   │   ├── store.py             # ChromaDB vector store
+│   │   ├── retriever.py         # High-level retrieval
+│   │   ├── embeddings.py        # Embedding client
+│   │   ├── bm25_store.py        # BM25 keyword search
+│   │   ├── hybrid_search.py     # RRF fusion
+│   │   └── reranker.py          # Cross-encoder reranking
+│   ├── generation/
+│   │   ├── drafter.py           # Draft generation
+│   │   ├── llm.py               # LLM client
+│   │   └── prompts.py           # Prompt templates
+│   ├── learning/
+│   │   └── simple_edit_store.py # Edit storage & retrieval
+│   └── persistence/
+│       └── stores.py            # File-backed stores
+├── frontend.py                  # Streamlit UI
+├── sample_docs/                 # Sample legal documents
+├── sample_outputs/              # Example generated drafts
+└── docs/
+    ├── ARCHITECTURE.md          # Detailed architecture
+    └── EVALUATION.md            # Evaluation analysis
+```
 
 ## Running Tests
 
@@ -143,251 +201,60 @@ Three sample legal documents are included in `sample_docs/`:
 uv run pytest tests/ -v
 ```
 
-## Approach
+## Key Features
 
 ### Document Processing
-- **Vision-based extraction:** Uses GPT-4o Vision to extract text, tables, signatures, stamps, and structured data from documents. Preserves layout and visual elements that OCR would miss.
-- **Digital PDFs:** Fast direct text extraction for PDFs with embedded text.
-- **Scanned content:** High-quality vision processing for images and scanned PDFs.
-- **Text files:** Directly ingested at 100% confidence.
-
-### Grounded Retrieval
-- **Vector store:** ChromaDB with cosine similarity and OpenAI `text-embedding-3-small` embeddings.
-- **Hybrid search:** Combines vector similarity + BM25 keyword matching with Reciprocal Rank Fusion.
-- **Reranking:** Cross-encoder reranking for improved relevance.
-- **Citations:** Every chunk carries `source_doc_id`, `filename`, and `page_num` metadata. Drafts include full citation lists with source references.
-
-### Draft Generation
-- **Prompt engineering:** Each draft type has a specialized system prompt enforcing `[Source: filename, Page X]` citation format.
-- **Retrieval-Augmented Generation (RAG):** Retrieved chunks are included in the prompt as numbered context blocks.
-- **Few-shot learning:** Past operator edits are retrieved and injected as examples to improve output quality.
-- **Confidence scoring:** Based on retrieval quality (average similarity + coverage bonus).
-
-### Improvement from Edits
-- **Edit capture:** Operator edits are stored in ChromaDB with embeddings for semantic retrieval.
-- **Simple learning:** No complex rule extraction — just stores before/after examples.
-- **Few-shot learning:** When generating new drafts, the system finds semantically similar past edits and injects them as examples.
-
-## Assumptions & Limitations
-
-- **API dependency:** Requires an OpenRouter API key with access to embedding and LLM models. Without it, retrieval and generation won't work.
-- **Vision model quality:** GPT-4o Vision provides excellent quality for most documents but may occasionally miss details in heavily degraded documents.
-- **Learning simplicity:** The improvement loop uses few-shot prompting rather than fine-tuning. This is practical and effective for small-to-medium edit volumes but doesn't scale to thousands of edits.
-- **Single-user scope:** No authentication or multi-tenancy. Designed as an internal tool for a single team.
-- **Chunking:** Character-based chunking (500 chars) is a reasonable default but not token-aware. Very long legal documents may benefit from larger chunk sizes.
-
----
-
-## Design Decisions & Tradeoffs
-
-### Vision Model vs Traditional OCR
-**Choice:** GPT-4o Vision via OpenRouter
-
-| Aspect | Vision Model | Traditional OCR |
-|--------|--------------|-----------------|
-| Tables | ✅ Native understanding | ❌ Loses structure |
-| Handwriting | ✅ Can read | ❌ Poor accuracy |
-| Layout | ✅ Preserves | ❌ Linear only |
-| Cost | ⚠️ Higher per page | ✅ Free (Tesseract) |
-| Speed | ⚠️ ~2-5s per page | ✅ <1s per page |
-
-**Rationale:** For legal documents, accuracy and structure preservation are more important than cost. Poor OCR leads to lost information and unusable drafts.
-
-### ChromaDB vs Pinecone/Weaviate
-**Choice:** ChromaDB (local, persistent)
-
-| Aspect | ChromaDB | Pinecone | Weaviate |
-|--------|----------|----------|----------|
-| Setup | ✅ Zero config | ⚠️ Cloud account | ⚠️ Docker/Cloud |
-| Cost | ✅ Free | ⚠️ Per-query | ⚠️ Infrastructure |
-| Scale | ⚠️ Single machine | ✅ Distributed | ✅ Distributed |
-| Persistence | ✅ Local files | ✅ Cloud | ✅ Configurable |
-
-**Rationale:** For an internal team tool with <10K documents, ChromaDB is ideal. Zero setup, survives restarts, no cloud costs.
-
-### Few-Shot Learning vs Fine-Tuning
-**Choice:** Few-shot with RAG (retrieving past edits)
-
-| Aspect | Few-Shot RAG | Fine-Tuning |
-|--------|--------------|-------------|
-| Setup time | ✅ Instant | ⚠️ Hours-days |
-| Flexibility | ✅ Adapts immediately | ❌ Frozen until retrain |
-| Scale limit | ⚠️ ~100 examples | ✅ Thousands |
-| Learning depth | ⚠️ Surface patterns | ✅ Deep patterns |
-
-**Rationale:** Legal drafting preferences change frequently. Few-shot allows immediate adaptation without retraining. Our quality gate ensures only meaningful edits are stored.
-
-### Quality Gate for Edits
-**Implementation:** Rejects edits with <15% text change
-
-**Rationale:** Storing whitespace fixes or typo corrections pollutes the example pool and wastes context window. Only substantial improvements (adding details, rephrasing) teach the model.
-
-### Weighted Retrieval for Edits
-**Formula:** `score = 0.5 × semantic + 0.3 × quality × recency + 0.2 × validation`
-
-**Rationale:** Not all past edits are equal:
-- Recent edits more likely to reflect current preferences
-- High-quality edits (substantial changes) more valuable
-- Edits with positive feedback (acceptance) are validated
-
----
-
-## System Capabilities
-
-### Document Processing
-- ✅ PDF, PNG, JPG, JPEG, TIFF, BMP, TXT
-- ✅ Image quality assessment with auto-enhancement
-- ✅ Unclear text marking: `[unclear: description]`
-- ✅ Handwriting detection
-- ✅ Table extraction to Markdown
+- ✅ PDF, PNG, JPG, JPEG, TIFF, BMP, TXT support
+- ✅ Vision-based extraction (GPT-4o) for images and scanned PDFs
+- ✅ Digital PDF text extraction (PyMuPDF)
+- ✅ Table detection and markdown conversion
 - ✅ Signature and stamp detection
 - ✅ Structured data extraction (parties, dates, amounts, case IDs)
+- ✅ Unclear text marking: `[unclear: description]`
 
-### Grounding & Retrieval
+### Retrieval & Grounding
 - ✅ Hybrid search (Vector + BM25 with RRF fusion)
-- ✅ Cross-encoder reranking
+- ✅ Cross-encoder reranking for relevance
 - ✅ Citations with source document and page
 - ✅ Insufficient evidence flagging
 - ✅ Retrieved chunks visibility
 
 ### Learning System
-- ✅ Quality gate for edit storage
+- ✅ Quality gate for edit storage (rejects trivial edits)
 - ✅ Deduplication of similar edits
 - ✅ Weighted retrieval by recency/quality/validation
-- ✅ Feedback tracking (acceptance/rejection)
-- ✅ Effectiveness metrics
+- ✅ Few-shot learning from past corrections
+- ✅ Effectiveness metrics tracking
 
----
+## Design Decisions
 
-## Sample Outputs
+### Vision Model vs Traditional OCR
+**Choice:** GPT-4o Vision via OpenRouter
 
-See `/sample_outputs/` directory for example generated drafts:
+For legal documents, accuracy and structure preservation are more important than cost. Vision models handle tables, handwriting, and layout better than traditional OCR.
 
-- **case_fact_summary.md** — Summary of key case facts and parties
-- **title_review_summary.md** — Financial breakdown and party information
-- **notice_summary.md** — Sale information and important notices
+### ChromaDB vs Cloud Vector DBs
+**Choice:** ChromaDB (local, persistent)
 
-All outputs include `[Source: filename, Page X]` citations for grounding verification.
+For an internal tool with <10K documents, ChromaDB provides zero setup, no cloud costs, and survives restarts.
 
----
+### Few-Shot Learning vs Fine-Tuning
+**Choice:** Few-shot with RAG
 
-## Evaluation Approach & Results
+Legal drafting preferences change frequently. Few-shot allows immediate adaptation without retraining, and our quality gate ensures only meaningful edits are stored.
 
-### Evaluation Criteria
+## Limitations
 
-The system is evaluated on three core dimensions:
+- **API dependency:** Requires OpenRouter API key
+- **Single-user scope:** No authentication or multi-tenancy
+- **Chunking:** Character-based (500 chars), not token-aware
+- **Scale:** Designed for single-machine deployment
 
-| Criterion | Description | Measurement |
-|-----------|-------------|-------------|
-| **Extraction Quality** | Accuracy of text and structure extraction from documents | Confidence scores, unclear section count |
-| **Grounding Accuracy** | How well outputs are supported by source documents | Citation coverage, retrieval scores |
-| **Learning Effectiveness** | Improvement in output quality from operator feedback | Acceptance rate with/without learned examples |
+## Documentation
 
-### 1. Document Extraction Evaluation
+- [Architecture Details](docs/ARCHITECTURE.md) - Complete technical architecture
+- [Evaluation Analysis](docs/EVALUATION.md) - Evaluation approach and results
 
-**Method:** Compare vision-extracted content against ground truth for sample documents.
+## License
 
-**Metrics:**
-- **Confidence Score:** Average per-document confidence (0-1 scale)
-- **Unclear Sections:** Count of `[unclear: ...]` markers
-- **Structure Preservation:** Tables, signatures, stamps detected
-
-**Results (Sample Documents):**
-
-| Document | Type | Confidence | Unclear Sections | Tables | Signatures |
-|----------|------|------------|------------------|--------|------------|
-| case_facts_001.txt | Text | 1.00 | 0 | N/A | N/A |
-| title_review_001.txt | Text | 1.00 | 0 | 2 | N/A |
-| notice_001.txt | Text | 1.00 | 0 | 4 | 1 detected |
-
-*Note: Text files are ingested directly at 100% confidence. For scanned PDFs/images, confidence typically ranges 0.85-0.98.*
-
-### 2. Retrieval Quality Evaluation
-
-**Method:** For each generated draft, measure retrieval relevance and citation coverage.
-
-**Metrics:**
-- **Average Similarity Score:** Mean similarity of retrieved chunks to query
-- **Citation Coverage:** Percentage of output sentences with source citations
-- **Insufficient Evidence Rate:** How often the system flags insufficient grounding
-
-**Thresholds:**
-- Minimum chunks for generation: 1
-- Minimum average similarity: 0.4
-- Minimum per-chunk similarity: 0.3
-
-**Results:**
-- Generated drafts include citations for all key factual claims
-- System correctly flags when querying topics not in uploaded documents
-- Retrieved chunks are semantically relevant (avg similarity > 0.6)
-
-### 3. Learning System Evaluation
-
-**Method:** Track whether generated drafts improve after operator edits are submitted.
-
-**Metrics:**
-- **Quality Gate Pass Rate:** Percentage of submitted edits that pass quality threshold
-- **Deduplication Rate:** How often similar edits are merged vs stored separately
-- **Acceptance Rate Comparison:** Drafts with learned examples vs without
-
-**Quality Gate Results:**
-
-| Edit Type | Examples Tested | Pass Rate |
-|-----------|-----------------|-----------|
-| Substantial rewrite | 10 | 100% |
-| Minor addition | 8 | 87.5% |
-| Whitespace only | 5 | 0% (rejected) |
-| Punctuation only | 3 | 0% (rejected) |
-
-**Learning Effectiveness:**
-
-The system tracks acceptance rates through the `/api/edits/feedback` endpoint and `/api/edits/effectiveness` report. After accumulating feedback, the system can measure:
-
-```python
-learning_improvement = acceptance_rate_with_edits - acceptance_rate_without_edits
-```
-
-*Initial observations:* Drafts that incorporate learned examples show improved specificity and formatting consistency compared to baseline generations.
-
-### 4. End-to-End Test Scenarios
-
-**Scenario 1: Case Fact Summary**
-- **Input:** Upload case_facts_001.txt → Query "Summarize the Smith v. Johnson case"
-- **Expected:** Draft with parties, key facts, damages, and citations
-- **Result:** ✅ Generated summary includes all case details with proper source citations
-
-**Scenario 2: Title Review**
-- **Input:** Upload title_review_001.txt → Query "Create a title review summary"
-- **Expected:** Financial breakdown, ownership chain, encumbrances
-- **Result:** ✅ All sections populated with accurate data and citations
-
-**Scenario 3: Learning from Edits**
-- **Input:** Generate draft → Submit edit adding specific detail → Regenerate similar query
-- **Expected:** New draft incorporates learned pattern
-- **Result:** ✅ Few-shot examples from similar edits injected into prompt
-
-**Scenario 4: Insufficient Evidence**
-- **Input:** Query about topic not in uploaded documents
-- **Expected:** Warning message about insufficient evidence
-- **Result:** ✅ System returns grounding warning with suggestions
-
-### 5. API Response Validation
-
-All endpoints return expected response structures:
-
-| Endpoint | Validation |
-|----------|------------|
-| `/api/documents/upload` | Returns document_id, confidence, chunks_created |
-| `/api/drafts/generate` | Returns draft with citations, confidence, grounding info |
-| `/api/edits/submit` | Returns edit_id or quality_rejected flag |
-| `/api/edits/effectiveness` | Returns learning metrics dictionary |
-
-### Summary
-
-The system successfully:
-- ✅ Extracts structured data from legal documents with high accuracy
-- ✅ Generates grounded drafts with proper source citations
-- ✅ Flags insufficient evidence when queries exceed available context
-- ✅ Learns from operator edits to improve future generations
-- ✅ Filters trivial edits through quality gate
-- ✅ Tracks effectiveness metrics for continuous improvement
+MIT
