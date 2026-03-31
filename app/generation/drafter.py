@@ -20,9 +20,9 @@ from .prompts import DraftType, build_draft_prompt
 logger = logging.getLogger(__name__)
 
 # Thresholds for grounding validation
-MIN_RETRIEVAL_CONFIDENCE = 0.3
+MIN_RETRIEVAL_CONFIDENCE = 0.2  # Lowered from 0.3 - be more permissive
 MIN_RELEVANT_CHUNKS = 1
-MIN_AVG_SIMILARITY = 0.4
+MIN_AVG_SIMILARITY = 0.25  # Lowered from 0.4 - semantic similarity can be low for legal docs
 
 
 @dataclass
