@@ -1,260 +1,184 @@
-# NerdFarm — Document Understanding & Grounded Drafting System
+# NerdFarm
 
-An AI-powered internal tooling system for **Pearson Specter Litt** that processes messy legal-style documents, extracts structured information, and produces grounded draft outputs that improve from operator feedback.
+Document processing system for legal documents. Extracts text from PDFs/images, indexes in ChromaDB, generates drafts with source citations.
 
-## Quick Start
-
-### Prerequisites
+## Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Poppler (for PDF processing):
-  - Linux: `sudo apt install poppler-utils`
-  - macOS: `brew install poppler`
-- OpenRouter API key ([get one here](https://openrouter.ai/))
+- uv package manager
+- Poppler (PDF processing): `apt install poppler-utils`
+- OpenRouter API key
 
-### Setup
+## Setup
 
 ```bash
-# Clone and enter the project
 cd nerdfarm
-
-# Copy environment file and add your API key
 cp .env.example .env
-# Edit .env and set: OPENROUTER_API_KEY=sk-or-...
-
-# Install dependencies
+# Edit .env: OPENROUTER_API_KEY=sk-or-xxxxx
 uv sync
-
-# Start the backend server
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Running the Frontend
+## Running
 
-In a separate terminal:
-
+**Backend:**
 ```bash
-# Start the Streamlit frontend
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+**Frontend:**
+```bash
 uv run streamlit run frontend.py
 ```
 
-**Access:**
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- Frontend UI: http://localhost:8501
+- API: http://localhost:8000
+- API docs: http://localhost:8000/docs
+- Frontend: http://localhost:8501
 
-## System Overview
-
-NerdFarm handles the full document understanding pipeline:
-
-1. **Document Processing** — Vision-based extraction from PDFs, images, and text files using GPT-4o Vision
-2. **Grounded Retrieval** — Hybrid vector + keyword search with cross-encoder reranking
-3. **Draft Generation** — LLM-powered legal draft creation grounded in retrieved evidence
-4. **Improvement from Edits** — Captures operator edits and uses few-shot learning
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Document Upload │────▶│  Vision Extractor │────▶│   Vector Store  │
-│  (PDF/IMG/TXT)   │     │  (GPT-4o Vision)  │     │   (ChromaDB)    │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-┌─────────────────┐     ┌──────────────────┐              │
-│  Operator Edits  │────▶│   Edit Store     │     ┌───────▼────────┐
-│  (Submit/Learn)  │     │   (ChromaDB)     │────▶│  Draft Generator│
-└─────────────────┘     └──────────────────┘     │  (LLM + RAG)   │
-                                                  └────────────────┘
-```
-
-## Frontend Guide
-
-The Streamlit frontend provides 5 pages:
-
-### 🏠 Home
-System overview and workflow description.
-
-### 📤 Upload
-- Drag-and-drop file upload
-- Supports: PDF, PNG, JPG, JPEG, TIFF, BMP, TXT
-- Shows processing progress and results
-- Displays: pages, chunks, extraction confidence
-
-### 📝 Generate
-- Select documents to query against
-- Choose draft type (case summary, title review, memo, etc.)
-- Enter query in natural language
-- View generated draft with:
-  - Confidence score
-  - Citations (expandable)
-  - Retrieved chunks (expandable)
-  - Grounding warnings (if insufficient evidence)
-
-### ✏️ Edit
-- Side-by-side original vs edited view
-- Submit corrections for learning
-- Optional edit reason
-
-### 📊 Learning
-- View edit statistics
-- Draft type distribution chart
-- Recent edits with quality scores
-- Effectiveness metrics
-
-## API Endpoints
+## API
 
 ### Documents
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/documents/upload` | Upload and process a document |
-| `GET` | `/api/documents` | List all documents |
-| `GET` | `/api/documents/{id}` | Get document details |
-| `GET` | `/api/documents/{id}/chunks` | Get document chunks |
-| `DELETE` | `/api/documents/{id}` | Delete a document |
+
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| POST | /api/documents/upload | multipart file | `{document_id, filename, chunks_created, avg_confidence}` |
+| GET | /api/documents | - | `[{document_id, filename, total_pages, chunks_created, avg_confidence}]` |
+| GET | /api/documents/{id} | - | `{document_id, filename, metadata, pages}` |
+| DELETE | /api/documents/{id} | - | `{deleted: true, chunks_removed}` |
 
 ### Drafts
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/drafts/generate` | Generate a grounded draft |
-| `GET` | `/api/drafts/{id}` | Get a generated draft |
-| `GET` | `/api/drafts/{id}/formatted` | Get draft with inline citations |
-| `GET` | `/api/drafts/types/available` | List available draft types |
 
-### Edits (Learning)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/edits/submit` | Submit an operator edit |
-| `GET` | `/api/edits/history` | View edit history |
-| `GET` | `/api/edits/{id}` | Get specific edit |
-| `GET` | `/api/edits/effectiveness` | Get learning metrics |
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| POST | /api/drafts/generate | `{query, draft_type, document_ids?}` | `{draft_id, content, citations, confidence, is_grounded, retrieved_chunks}` |
+| GET | /api/drafts/{id} | - | `{draft_id, content, citations, confidence, draft_type, query}` |
+| GET | /api/drafts/types/available | - | `{draft_types: [{value, name, description}]}` |
 
-## Sample Usage (CLI)
+### Edits
 
-### Upload a document
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| POST | /api/edits/submit | `{draft_id, original_text, edited_text, edit_reason?, draft_type}` | `{edit_id, quality_rejected, message}` |
+| GET | /api/edits/history?limit=50 | - | `{edits: [{edit_id, before, after, reason, quality_score}]}` |
+| GET | /api/edits/effectiveness | - | `{total_edits, avg_quality_score}` |
+
+## CLI Examples
+
 ```bash
-curl -X POST http://localhost:8000/api/documents/upload \
-  -F "file=@sample_docs/case_facts_001.txt"
-```
+# Upload
+curl -X POST http://localhost:8000/api/documents/upload -F "file=@sample_docs/case_facts_001.txt"
 
-### Generate a draft
-```bash
+# Generate
 curl -X POST http://localhost:8000/api/drafts/generate \
   -H "Content-Type: application/json" \
-  -d '{
-    "query": "Summarize the Smith v. Johnson case",
-    "draft_type": "case_fact_summary"
-  }'
-```
+  -d '{"query": "Summarize the case", "draft_type": "case_fact_summary"}'
 
-### Submit an edit
-```bash
+# Submit edit
 curl -X POST http://localhost:8000/api/edits/submit \
   -H "Content-Type: application/json" \
-  -d '{
-    "draft_id": "<draft_id>",
-    "original_text": "The plaintiff purchased the property.",
-    "edited_text": "The plaintiff, Martha Smith, purchased the property at 456 Oak Avenue in August 2020.",
-    "edit_reason": "Added specific details"
-  }'
+  -d '{"draft_id": "xxx", "original_text": "A", "edited_text": "A with details", "draft_type": "case_fact_summary"}'
 ```
 
 ## Project Structure
 
 ```
-nerdfarm/
-├── app/
-│   ├── main.py                  # FastAPI application
-│   ├── config.py                # Settings and configuration
-│   ├── api/
-│   │   ├── documents.py         # Document endpoints
-│   │   ├── drafts.py            # Draft generation endpoints
-│   │   └── edits.py             # Edit/learning endpoints
-│   ├── document_processor/
-│   │   ├── extractor.py         # Document extraction logic
-│   │   ├── vision_processor.py  # GPT-4o Vision processing
-│   │   └── schemas.py           # Data structures
-│   ├── retrieval/
-│   │   ├── store.py             # ChromaDB vector store
-│   │   ├── retriever.py         # High-level retrieval
-│   │   ├── embeddings.py        # Embedding client
-│   │   ├── bm25_store.py        # BM25 keyword search
-│   │   ├── hybrid_search.py     # RRF fusion
-│   │   └── reranker.py          # Cross-encoder reranking
-│   ├── generation/
-│   │   ├── drafter.py           # Draft generation
-│   │   ├── llm.py               # LLM client
-│   │   └── prompts.py           # Prompt templates
-│   ├── learning/
-│   │   └── simple_edit_store.py # Edit storage & retrieval
-│   └── persistence/
-│       └── stores.py            # File-backed stores
-├── frontend.py                  # Streamlit UI
-├── sample_docs/                 # Sample legal documents
-├── sample_outputs/              # Example generated drafts
-└── docs/
-    ├── ARCHITECTURE.md          # Detailed architecture
-    └── EVALUATION.md            # Evaluation analysis
+app/
+├── main.py              # FastAPI routes
+├── config.py            # Settings from .env
+├── api/
+│   ├── documents.py     # Upload, list, delete documents
+│   ├── drafts.py        # Generate, retrieve drafts
+│   └── edits.py         # Submit edits, history
+├── document_processor/
+│   ├── extractor.py     # Routes .pdf/.txt/.jpg to appropriate processor
+│   ├── vision_processor.py  # GPT-4o-mini API calls
+│   └── schemas.py       # ExtractedDocument, Page dataclasses
+├── retrieval/
+│   ├── store.py         # ChromaDB operations
+│   ├── retriever.py     # Hybrid search orchestration
+│   ├── embeddings.py    # text-embedding-3-small API calls
+│   ├── bm25_store.py    # rank_bm25 keyword search
+│   ├── hybrid_search.py # RRF fusion
+│   └── reranker.py      # ms-marco-MiniLM cross-encoder
+├── generation/
+│   ├── drafter.py       # DraftGenerator class
+│   ├── llm.py           # OpenRouter chat completions
+│   └── prompts.py       # Prompt templates per draft type
+├── learning/
+│   └── simple_edit_store.py  # QualityGate, SimpleEditStore
+└── persistence/
+    └── stores.py        # JSON file persistence
 ```
 
-## Running Tests
+## Tests
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-## Key Features
+26 tests cover: QualityGate, EditExample, VectorStore chunking, DraftOutput, Citations.
 
-### Document Processing
-- ✅ PDF, PNG, JPG, JPEG, TIFF, BMP, TXT support
-- ✅ Vision-based extraction (GPT-4o) for images and scanned PDFs
-- ✅ Digital PDF text extraction (PyMuPDF)
-- ✅ Table detection and markdown conversion
-- ✅ Signature and stamp detection
-- ✅ Structured data extraction (parties, dates, amounts, case IDs)
-- ✅ Unclear text marking: `[unclear: description]`
+## Configuration
 
-### Retrieval & Grounding
-- ✅ Hybrid search (Vector + BM25 with RRF fusion)
-- ✅ Cross-encoder reranking for relevance
-- ✅ Citations with source document and page
-- ✅ Insufficient evidence flagging
-- ✅ Retrieved chunks visibility
+`.env`:
+```
+OPENROUTER_API_KEY=sk-or-xxxxx
+CHROMA_PERSIST_DIR=./chroma_data
+UPLOAD_DIR=./uploads
+MAX_UPLOAD_SIZE=52428800
+```
 
-### Learning System
-- ✅ Quality gate for edit storage (rejects trivial edits)
-- ✅ Deduplication of similar edits
-- ✅ Weighted retrieval by recency/quality/validation
-- ✅ Few-shot learning from past corrections
-- ✅ Effectiveness metrics tracking
+`app/config.py`:
+```python
+class Settings:
+    vision_model: str = "openai/gpt-4o-mini"
+    llm_model: str = "openai/gpt-4o"
+    embedding_model: str = "openai/text-embedding-3-small"
+    use_hybrid_search: bool = True
+    use_reranker: bool = True
+```
 
-## Design Decisions
+## Draft Types
 
-### Vision Model vs Traditional OCR
-**Choice:** GPT-4o Vision via OpenRouter
+| Value | Description |
+|-------|-------------|
+| case_fact_summary | Case facts and parties |
+| title_review_summary | Property title analysis |
+| notice_summary | Legal notice summary |
+| document_checklist | Required documents |
+| internal_memo | Professional memo |
 
-For legal documents, accuracy and structure preservation are more important than cost. Vision models handle tables, handwriting, and layout better than traditional OCR.
+## Grounding Thresholds
 
-### ChromaDB vs Cloud Vector DBs
-**Choice:** ChromaDB (local, persistent)
+```python
+MIN_RETRIEVAL_CONFIDENCE = 0.2  # Per-chunk minimum
+MIN_RELEVANT_CHUNKS = 1         # Minimum chunks required
+MIN_AVG_SIMILARITY = 0.25       # Average across chunks
+```
 
-For an internal tool with <10K documents, ChromaDB provides zero setup, no cloud costs, and survives restarts.
+If thresholds not met, returns `is_grounded: false` with `grounding_warning` message.
 
-### Few-Shot Learning vs Fine-Tuning
-**Choice:** Few-shot with RAG
+## Learning System
 
-Legal drafting preferences change frequently. Few-shot allows immediate adaptation without retraining, and our quality gate ensures only meaningful edits are stored.
+### Quality Gate
+Rejects edits with <15% text change, <20 character length, or whitespace/punctuation only changes.
+
+### Edit Storage
+Stored in ChromaDB `edit_examples` collection with embeddings. Metadata includes: quality_score, timestamp, times_seen, draft_type.
+
+### Retrieval Weights
+```
+score = 0.5 * semantic + 0.3 * quality * recency + 0.2 * validation
+```
+Recency: <7 days = 1.2x, 7-30 days = 1.0x, >30 days = 0.8x
 
 ## Limitations
 
-- **API dependency:** Requires OpenRouter API key
-- **Single-user scope:** No authentication or multi-tenancy
-- **Chunking:** Character-based (500 chars), not token-aware
-- **Scale:** Designed for single-machine deployment
+- No authentication
+- Character-based chunking (500 chars)
+- Single-machine ChromaDB
+- No async job queue
 
 ## Documentation
 
-- [Architecture Details](docs/ARCHITECTURE.md) - Complete technical architecture
-- [Evaluation Analysis](docs/EVALUATION.md) - Evaluation approach and results
-
-## License
-
-MIT
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Data models, API contracts, implementation details
+- [EVALUATION.md](docs/EVALUATION.md) - Test results, performance metrics
