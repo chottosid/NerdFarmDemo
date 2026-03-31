@@ -181,7 +181,7 @@ def show_upload_page():
             col1.markdown(f"📄 **{doc['filename']}**")
             col2.caption(f"Pages: {doc['pages']}")
             col3.caption(f"Chunks: {doc['chunks']}")
-            col4.caption(f"Conf: {doc['confidence']:.0f}%")
+            col4.caption(f"Conf: {doc['confidence']*100:.0f}%")
             if col5.button("🗑️", key=f"del_{doc['id']}", help="Delete document"):
                 try:
                     response = asyncio.run(api_request("DELETE", f"/api/documents/{doc['id']}"))

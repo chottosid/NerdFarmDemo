@@ -114,16 +114,28 @@ async def list_documents() -> list[dict]:
     settings = get_settings()
     store_dir = Path(settings.upload_dir) / ".doc_store"
 
+    # Get actual chunk counts from vector store
+    store = VectorStore()
+
     documents = []
     if store_dir.exists():
         for doc_file in store_dir.glob("*.json"):
             try:
                 data = json.loads(doc_file.read_text())
+                doc_id = data["id"]
+
+                # Query actual chunk count from ChromaDB
+                chunk_results = store.collection.get(
+                    where={"source_doc_id": doc_id},
+                    include=[]
+                )
+                chunk_count = len(chunk_results["ids"]) if chunk_results["ids"] else 0
+
                 documents.append({
-                    "document_id": data["id"],
+                    "document_id": doc_id,
                     "filename": data["filename"],
                     "total_pages": len(data.get("pages", [])),
-                    "chunks_created": 0,  # Would need to query vector store for actual count
+                    "chunks_created": chunk_count,
                     "avg_confidence": data.get("metadata", {}).get("avg_confidence", 0.0) if data.get("metadata") else 0.0,
                 })
             except Exception as e:
