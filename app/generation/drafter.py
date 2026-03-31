@@ -112,16 +112,21 @@ class DraftGenerator:
             logger.warning(
                 f"Insufficient evidence for query: {grounding_check['reason']}"
             )
+            # Calculate actual confidence from what we retrieved
+            actual_confidence = self._calculate_confidence(chunks) if chunks else 0.0
+            # Build retrieved chunks info so user can see what was found
+            retrieved_chunks_info = self._build_retrieved_chunks_info(chunks) if chunks else []
+
             return DraftOutput(
                 draft_id=draft_id,
                 content=self._format_insufficient_evidence_message(
                     query, grounding_check["reason"]
                 ),
                 citations=[],
-                confidence=0.0,
+                confidence=actual_confidence,
                 draft_type=draft_type.value,
                 query=query,
-                retrieved_chunks=[],
+                retrieved_chunks=retrieved_chunks_info,
                 is_grounded=False,
                 grounding_warning=grounding_check["reason"],
             )
